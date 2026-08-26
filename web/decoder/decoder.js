@@ -1,3 +1,4 @@
+(function() {
 // ============================================================
 // FSK DECODER — Person B's job
 // Matches the team SPEC.md exactly.
@@ -371,3 +372,7 @@ function runSelfTest() {
   alert(`Self-Test ${passed ? '✅ PASSED' : '❌ FAILED'}\nInput bits → "${result}" (expected "Hi")`);
   console.log('Self-test result:', result, '| Expected: Hi | Pass:', passed);
 }
+window.startListening = startListening; 
+window.stopListening = stopListening; 
+window.clearOutput = clearOutput; 
+window.runSelfTest = runSelfTest; })();
