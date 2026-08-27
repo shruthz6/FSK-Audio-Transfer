@@ -13,6 +13,10 @@ This document is the "shared rulebook" all 3 apps (Web, Android, iOS) must follo
 | Baud rate | **50 baud** (50 bits/sec) | Start conservative; revisit in Phase 3 after reliability testing |
 | Sample rate | **44100 Hz** | Standard rate, supported on all platforms by default |
 | Bit duration | 1 / 50 = **20 ms per bit** | Derived from baud rate |
+
+**Update (Phase 1 testing):** The decoder's `PREAMBLE_THRESHOLD` must be close to the *full* preamble length (~48 of 50 windows), not a short sample (15 was tried and failed) — otherwise leftover preamble tones get misread as the start of real data.
+
+**Known limitation (deferred to Phase 2):** On longer messages, sender/receiver audio clocks drift slightly relative to each other, which can misread a run of bits mid-transmission until byte-framing resync catches back on. Short messages decode cleanly; longer ones may show partial mid-message corruption. This is what Phase 2's checksum (detect bad data) and decoder robustness work (reduce how often it happens) are for.
 | Amplitude / volume | 70–80% of max device volume | Loud enough to be heard clearly, low enough to avoid distortion/clipping |
 
 ---
