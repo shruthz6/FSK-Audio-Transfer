@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>FSK Encoder Test — Person A</title>
+  <style>
+    body { font-family: sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+    input, button { font-size: 16px; padding: 8px; }
+    input { width: 300px; }
+    #bitsOutput { font-family: monospace; background: #f4f4f4; padding: 12px; white-space: pre-wrap; word-break: break-all; margin-top: 16px; }
+    canvas { border: 1px solid #ccc; margin-top: 16px; width: 100%; height: 150px; }
+    #status { margin-top: 12px; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>FSK Encoder Test Page</h1>
+  <p>Type a short word, click Play, and you should hear a rapid beeping sound — that's your text, encoded as audio.</p>
+
+  <input id="textInput" type="text" value="Hi" placeholder="Enter text to encode" />
+  <button id="playBtn">Play</button>
+  <div id="status"></div>
+
+  <h3>Generated bit sequence (for manual verification):</h3>
+  <div id="bitsOutput">—</div>
+
+  <h3>Waveform preview:</h3>
+  <canvas id="waveform"></canvas>
+
+  <script src="encoder.js"></script>
+  <script>
+    const textInput = document.getElementById('textInput');
+    const playBtn = document.getElementById('playBtn');
+    const bitsOutput = document.getElementById('bitsOutput');
+    const statusEl = document.getElementById('status');
+    const canvas = document.getElementById('waveform');
+    const ctx = canvas.getContext('2d');
+
+    function drawWaveform(samples) {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      const step = Math.ceil(samples.length / canvas.width);
+      for (let x = 0; x < canvas.width; x++) {
+        const sampleIndex = x * step;
+        const y = (canvas.height / 2) - (samples[sampleIndex] || 0) * (canvas.height / 2 - 5);
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = '#2563eb';
+      ctx.stroke();
+    }
+
+    playBtn.addEventListener('click', async () => {
+      const text = textInput.value;
+      if (!text) return;
+
+      // Show the bit sequence for manual checking against an ASCII table
+      const bits = FSKEncoder.textToFramedBits(text);
+      bitsOutput.textContent = bits.join('');
+      console.log('Text:', text);
+      console.log('Framed bits:', bits);
+
+      // Draw + play the audio
+      const samples = FSKEncoder.textToFullAudioSamples(text);
+      drawWaveform(samples);
+
+      statusEl.textContent = 'Playing...';
+      playBtn.disabled = true;
+      await FSKEncoder.playText(text);
+      statusEl.textContent = 'Done.';
+      playBtn.disabled = false;
+    });
+  </script>
+</body>
+</html>
