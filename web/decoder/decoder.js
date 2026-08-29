@@ -48,7 +48,7 @@ let decodedText    = '';
 // (we don't try to decode bits until after the preamble is found)
 let preambleDetected = false;
 let preambleWindowCount = 0;   // counts consecutive preamble-like windows seen
-const PREAMBLE_THRESHOLD = 15; // need ~15 alternating windows (≈0.3 sec) to confirm preamble
+const PREAMBLE_THRESHOLD = 48; // must match the encoder's ~50-window (1 sec) preamble length
 
 // Track last decoded bit to detect the alternating preamble pattern
 let lastPreambleBit = -1;
@@ -275,7 +275,14 @@ async function startListening() {
 
   try {
     // Ask the browser for microphone access
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+  audio: {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false
+  },
+  video: false
+});
     audioContext = new AudioContext({ sampleRate: SPEC.SAMPLE_RATE });
 
     // Connect mic → script processor → detect bits
