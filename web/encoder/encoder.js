@@ -6,8 +6,8 @@
 const SPEC = {
   SPACE_FREQ: 1900,              // bit = 0
   MARK_FREQ: 2300,               // bit = 1
-  BAUD_RATE: 50,                 // bits per second
-  BIT_DURATION_SEC: 1 / 50,      // 20 ms per bit
+  BAUD_RATE: 20,                 // bits per second
+  BIT_DURATION_SEC: 1 / 20,      // 50 ms per bit
   SAMPLE_RATE: 44100,            // standard audio sample rate
   PREAMBLE_DURATION_SEC: 1.0,    // alternating tone before data
   POSTAMBLE_FREQ: 2700,          // distinct "end of transmission" tone
