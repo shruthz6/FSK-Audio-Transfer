@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>FSK Send</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <div class="app-header">
+      <div class="icon">📤</div>
+      <div>
+        <h1>FSK Send</h1>
+        <p>Encode a file as audio and play it out loud</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <label class="dropzone" id="dropzone">
+        <div class="dz-icon">📄</div>
+        <div>Click to choose a file, or drag one here</div>
+        <div style="font-size:12px; margin-top:4px;">Text-based files work best (.txt, .csv, .json, code files)</div>
+        <input type="file" id="fileInput" />
+      </label>
+
+      <div class="file-chip" id="fileChip">
+        <span class="name" id="fileName"></span>
+        <span class="size" id="fileSize"></span>
+        <span class="remove" id="removeFile">✕</span>
+      </div>
+
+      <button class="btn-primary" id="sendBtn" disabled>Play / Send</button>
+      <div class="status-line">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Choose a file to begin.</span>
+      </div>
+    </div>
+
+    <a class="nav-link" href="receive.html">Go to Receive app →</a>
+  </div>
+
+  <script src="encoder/encoder.js"></script>
+  <script src="shared/fsk-helpers.js"></script>
+  <script>
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const fileChip = document.getElementById('fileChip');
+    const fileNameEl = document.getElementById('fileName');
+    const fileSizeEl = document.getElementById('fileSize');
+    const removeFile = document.getElementById('removeFile');
+    const sendBtn = document.getElementById('sendBtn');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+
+    let selectedFile = null;
+
+    function setStatus(text, state) {
+      statusText.textContent = text;
+      statusDot.className = 'status-dot' + (state ? ' ' + state : '');
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function onFileChosen(file) {
+      selectedFile = file;
+      fileNameEl.textContent = file.name;
+      fileSizeEl.textContent = formatSize(file.size);
+      fileChip.classList.add('visible');
+      sendBtn.disabled = false;
+      setStatus('Ready to send "' + file.name + '".');
+    }
+
+    dropzone.addEventListener('click', (e) => {
+      if (e.target === removeFile) return;
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) onFileChosen(fileInput.files[0]);
+    });
+
+    ['dragover', 'dragenter'].forEach(evt =>
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropzone.classList.add('drag-over');
+      })
+    );
+    ['dragleave', 'drop'].forEach(evt =>
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('drag-over');
+      })
+    );
+    dropzone.addEventListener('drop', (e) => {
+      if (e.dataTransfer.files[0]) onFileChosen(e.dataTransfer.files[0]);
+    });
+
+    removeFile.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectedFile = null;
+      fileInput.value = '';
+      fileChip.classList.remove('visible');
+      sendBtn.disabled = true;
+      setStatus('Choose a file to begin.');
+    });
+
+    sendBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+      sendBtn.disabled = true;
+      setStatus('Reading file...', 'active');
+
+      try {
+        const text = await selectedFile.text();
+        setStatus('Encoding + playing "' + selectedFile.name + '"...', 'active');
+        await FSKHelpers.playPacket(text, selectedFile.name);
+
+        setStatus('Done. Sent "' + selectedFile.name + '".', 'good');
+      } catch (err) {
+        console.error(err);
+        setStatus('Error: ' + err.message, 'bad');
+      } finally {
+        sendBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

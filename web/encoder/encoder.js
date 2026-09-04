@@ -6,8 +6,8 @@
 const SPEC = {
   SPACE_FREQ: 1900,              // bit = 0
   MARK_FREQ: 2300,               // bit = 1
-  BAUD_RATE: 50,                 // bits per second
-  BIT_DURATION_SEC: 1 / 50,      // 20 ms per bit
+  BAUD_RATE: 20,                 // bits per second
+  BIT_DURATION_SEC: 1 / 20,      // 50 ms per bit
   SAMPLE_RATE: 44100,            // standard audio sample rate
   PREAMBLE_DURATION_SEC: 1.0,    // alternating tone before data
   POSTAMBLE_FREQ: 2700,          // distinct "end of transmission" tone
@@ -103,7 +103,8 @@ function generateSilenceSamples(durationSec) {
 function textToFullAudioSamples(text) {
   const silence = generateSilenceSamples(SPEC.SILENCE_GUARD_SEC);
   const preamble = generatePreambleSamples();
-  const dataBits = textToFramedBits(text);
+  const packet = buildFullPacket(text);
+  const dataBits = bytesToFramedBits(packet); 
   const data = bitsToSamples(dataBits);
   const postamble = generatePostambleSamples();
 
@@ -143,10 +144,113 @@ async function playText(text) {
   });
 }
 
+// ============================================================
+// PHASE 2 ADDITIONS — Person A
+// Add this code into web/encoder/encoder.js, ABOVE the line:
+//   window.FSKEncoder = { ... }
+// ============================================================
+
+/**
+ * CRC-8 checksum (polynomial 0x07) — verified against the official
+ * CRC-8 test vector: crc8("123456789") === 0xF4
+ */
+function crc8(bytes) {
+  let crc = 0x00;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) {
+      if (crc & 0x80) {
+        crc = ((crc << 1) ^ 0x07) & 0xFF;
+      } else {
+        crc = (crc << 1) & 0xFF;
+      }
+    }
+  }
+  return crc;
+}
+
+/**
+ * Builds the file metadata header per SPEC.md Section 6:
+ * [filename length: 1 byte] [filename: variable] [file size: 4 bytes] [file type: 8 bytes, padded]
+ */
+function buildFileHeader(filename, fileSizeBytes) {
+  const filenameBytes = new TextEncoder().encode(filename);
+  if (filenameBytes.length > 255) {
+    throw new Error('Filename too long (max 255 bytes)');
+  }
+
+  // Pull the extension from the filename (default to 'txt' if none found)
+  const extMatch = filename.match(/\.([a-zA-Z0-9]+)$/);
+  const ext = extMatch ? extMatch[1] : 'txt';
+  const extPadded = ext.padEnd(8, '\0').slice(0, 8);
+  const extBytes = new TextEncoder().encode(extPadded);
+
+  // File size as 4 bytes, most significant byte first
+  const sizeBytes = new Uint8Array([
+    (fileSizeBytes >>> 24) & 0xFF,
+    (fileSizeBytes >>> 16) & 0xFF,
+    (fileSizeBytes >>> 8) & 0xFF,
+    fileSizeBytes & 0xFF,
+  ]);
+
+  const header = new Uint8Array(1 + filenameBytes.length + 4 + 8);
+  let offset = 0;
+  header[offset++] = filenameBytes.length;
+  header.set(filenameBytes, offset); offset += filenameBytes.length;
+  header.set(sizeBytes, offset); offset += 4;
+  header.set(extBytes, offset); offset += 8;
+
+  return header;
+}
+
+/**
+ * Builds the FULL packet: [header] [payload bytes] [1-byte CRC-8 checksum]
+ * This replaces plain text as the thing that gets turned into framed bits + audio.
+ */
+function buildFullPacket(text, filename = 'message.txt') {
+  const payloadBytes = new TextEncoder().encode(text);
+  const header = buildFileHeader(filename, payloadBytes.length);
+
+  const headerAndPayload = new Uint8Array(header.length + payloadBytes.length);
+  headerAndPayload.set(header, 0);
+  headerAndPayload.set(payloadBytes, header.length);
+
+  const checksum = crc8(headerAndPayload);
+
+  const fullPacket = new Uint8Array(headerAndPayload.length + 1);
+  fullPacket.set(headerAndPayload, 0);
+  fullPacket[headerAndPayload.length] = checksum;
+
+  return fullPacket;
+}
+
+/**
+ * Same framing logic as before (start/8 data bits/stop), but now generalized
+ * to work on any byte array — not just text — since it now needs to frame
+ * the header and checksum bytes too.
+ */
+function bytesToFramedBits(bytes) {
+  const bits = [];
+  for (const byte of bytes) {
+    bits.push(0); // start bit
+    for (let i = 7; i >= 0; i--) {
+      bits.push((byte >> i) & 1);
+    }
+    bits.push(1); // stop bit
+  }
+  return bits;
+}
+
+// ============================================================
+// END OF PHASE 2 ADDITIONS
+// ============================================================
 // Make these available to index.html and, later, to Person C's integration code
 window.FSKEncoder = {
   SPEC,
   textToFramedBits,
   textToFullAudioSamples,
   playText,
+  crc8,
+  buildFileHeader, 
+  buildFullPacket 
 };
