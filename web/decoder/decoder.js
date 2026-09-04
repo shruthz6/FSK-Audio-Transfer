@@ -11,7 +11,7 @@ const SPEC = {
   PREAMBLE_FREQ1: 1900,    
   PREAMBLE_FREQ2: 2300,    
   POSTAMBLE_FREQ: 2700,    
-  BAUD_RATE:      50,      
+  BAUD_RATE:      20,      
 };
 
 const SAMPLES_PER_BIT = Math.round(SPEC.SAMPLE_RATE / SPEC.BAUD_RATE); 
@@ -28,10 +28,11 @@ let decodedText    = '';
 
 let preambleDetected = false;
 let preambleWindowCount = 0;   
-const PREAMBLE_THRESHOLD = 48; 
+const PREAMBLE_THRESHOLD = 15; 
 
 let lastPreambleBit = -1;
 let preambleAltCount = 0;
+let postambleStreak = 0;
 
 // ============================================================
 // GOERTZEL ALGORITHM
@@ -199,10 +200,10 @@ function processAudioSamples(newSamples) {
     const window = sampleBuffer.splice(0, SAMPLES_PER_BIT);
     const floatWindow = new Float32Array(window);
 
-    if (preambleDetected && detectPostamble(floatWindow)) {
-      finishDecoding();
-      return;
-    }
+    if (preambleDetected && detectPostamble(floatWindow)) 
+      { postambleStreak++; if (postambleStreak >= 2) 
+        { finishDecoding(); return; } 
+      } else { postambleStreak = 0; }
 
     const bit = detectBit(floatWindow);
 
@@ -261,6 +262,7 @@ function finishDecoding() {
   preambleDetected = false;
   lastPreambleBit = -1;
   preambleAltCount = 0;
+  postambleStreak = 0
 }
 
 function updateLiveDisplay() {

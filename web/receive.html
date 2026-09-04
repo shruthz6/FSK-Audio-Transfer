@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>FSK Receive</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <div class="app-header">
+      <div class="icon">📥</div>
+      <div>
+        <h1>FSK Receive</h1>
+        <p>Listen for audio and decode it back into a file</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="btn-row">
+        <button class="btn-secondary" id="start-btn">🎙️ Start Listening</button>
+        <button class="btn-secondary" id="stop-btn" disabled>⏹ Stop</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn-secondary" id="clear-btn">Clear</button>
+        <button class="btn-secondary" id="selftest-btn">Run Self-Test</button>
+      </div>
+
+      <div class="status-line">
+        <span class="status-dot" id="status-dot-visual"></span>
+        <span id="status">Idle. Click "Start Listening" to begin.</span>
+      </div>
+      <div class="status-line" id="bit-count"></div>
+
+      <div class="output-box" id="decoded-output">(nothing decoded yet)</div>
+
+      <button class="btn-primary" id="downloadBtn" style="display:none;">⬇ Download decoded file</button>
+    </div>
+
+    <a class="nav-link" href="send.html">← Go to Send app</a>
+  </div>
+
+  <script src="decoder/decoder.js"></script>
+  <script>
+    const startBtn = document.getElementById('start-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const selfTestBtn = document.getElementById('selftest-btn');
+    const statusDotVisual = document.getElementById('status-dot-visual');
+    const statusEl = document.getElementById('status');
+    const outputBox = document.getElementById('decoded-output');
+    const downloadBtn = document.getElementById('downloadBtn');
+
+    let lastDecodedPacket = null;
+
+    const statusObserver = new MutationObserver(() => {
+      const msg = statusEl.textContent;
+      statusDotVisual.className = 'status-dot';
+      if (msg.includes('Listening')) statusDotVisual.classList.add('active');
+      else if (msg.includes('complete')) statusDotVisual.classList.add('good');
+      else if (msg.includes('failed') || msg.includes('error') || msg.includes('Error')) statusDotVisual.classList.add('bad');
+    });
+    statusObserver.observe(statusEl, { childList: true, characterData: true, subtree: true });
+
+    const outputObserver = new MutationObserver(() => {
+      const text = outputBox.textContent;
+      outputBox.classList.toggle('has-content', text && text !== '(nothing decoded yet)');
+
+      const match = text.match(/\[✅ File: (.+?) \| Size: (\d+)b \| Type: (.*?)\]\n([\s\S]*)/);
+      if (match) {
+        lastDecodedPacket = { filename: match[1], fileType: match[3], payloadText: match[4] };
+        downloadBtn.style.display = 'block';
+      } else {
+        downloadBtn.style.display = 'none';
+        lastDecodedPacket = null;
+      }
+    });
+    outputObserver.observe(outputBox, { childList: true, characterData: true, subtree: true });
+
+    startBtn.addEventListener('click', startListening);
+    stopBtn.addEventListener('click', stopListening);
+    clearBtn.addEventListener('click', () => {
+      clearOutput();
+      downloadBtn.style.display = 'none';
+      lastDecodedPacket = null;
+    });
+    selfTestBtn.addEventListener('click', runSelfTest);
+
+    downloadBtn.addEventListener('click', () => {
+      if (!lastDecodedPacket) return;
+      const blob = new Blob([lastDecodedPacket.payloadText], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = lastDecodedPacket.filename || ('decoded.' + (lastDecodedPacket.fileType || 'txt'));
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>
