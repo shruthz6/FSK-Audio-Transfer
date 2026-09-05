@@ -22,18 +22,19 @@
     </div>
   </div>
 
-  <script src="encoder/encoder.js"></script>
-  <script src="shared/fsk-helpers.js"></script>
+  <script src="encoder/encoder.js?v=2.1"></script>
+  <script src="decoder/decoder.js?v=2.1"></script>
+  <script src="shared/fsk-helpers.js?v=2.1"></script>
   <script>
   (function () {
     const logEl = document.getElementById('log');
     function log(msg) {
-      logEl.textContent += '\n' + msg;
+      logEl.textContent += (logEl.textContent ? '\n' : '') + msg;
       logEl.classList.add('has-content');
     }
 
-    const LOCAL_SPEC = window.FSKEncoder.SPEC;
-    const SAMPLES_PER_BIT = Math.round(LOCAL_SPEC.SAMPLE_RATE / LOCAL_SPEC.BAUD_RATE);
+    const SPEC = window.FSKEncoder.SPEC;
+    const SAMPLES_PER_BIT = Math.round(SPEC.SAMPLE_RATE / SPEC.BAUD_RATE);
 
     function goertzel(samples, targetFreq, sampleRate) {
       const N = samples.length;
@@ -49,125 +50,121 @@
     }
 
     function detectBit(samples) {
-      const eSpace = goertzel(samples, LOCAL_SPEC.SPACE_FREQ, LOCAL_SPEC.SAMPLE_RATE);
-      const eMark = goertzel(samples, LOCAL_SPEC.MARK_FREQ, LOCAL_SPEC.SAMPLE_RATE);
-      return eMark > eSpace ? 1 : 0;
+      const eSpace = goertzel(samples, SPEC.SPACE_FREQ, SPEC.SAMPLE_RATE);
+      const eMark  = goertzel(samples, SPEC.MARK_FREQ,  SPEC.SAMPLE_RATE);
+      const maxEnergy = Math.max(eSpace, eMark);
+      return { bit: eMark > eSpace ? 1 : 0, isSilence: maxEnergy < 1.0 };
     }
 
     function detectPostamble(samples) {
-      const eP = goertzel(samples, LOCAL_SPEC.POSTAMBLE_FREQ, LOCAL_SPEC.SAMPLE_RATE);
-      const eS = goertzel(samples, LOCAL_SPEC.SPACE_FREQ, LOCAL_SPEC.SAMPLE_RATE);
-      const eM = goertzel(samples, LOCAL_SPEC.MARK_FREQ, LOCAL_SPEC.SAMPLE_RATE);
-      return eP > eS * 2 && eP > eM * 2;
-    }
-
-    function decodeBitsToBytes(bits) {
-      let bytes = [], i = 0;
-      while (i < bits.length - 9) {
-        if (bits[i] !== 0) { i++; continue; }
-        if (i + 9 >= bits.length) break;
-        let byteVal = 0;
-        for (let b = 0; b < 8; b++) byteVal = (byteVal << 1) | bits[i + 1 + b];
-        if (bits[i + 9] === 1) { bytes.push(byteVal); i += 10; } else { i++; }
-      }
-      return bytes;
-    }
-
-    function crc8(dataArray) {
-      let crc = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        crc ^= dataArray[i];
-        for (let j = 0; j < 8; j++) {
-          crc = (crc & 0x80) ? ((crc << 1) ^ 0x07) : (crc << 1);
-          crc &= 0xFF;
-        }
-      }
-      return crc;
-    }
-
-    function parsePacket(bytes) {
-      if (bytes.length < 13) return { error: "Packet too small" };
-      let offset = 0;
-      const filenameLength = bytes[offset++];
-      let filename = '';
-      for (let i = 0; i < filenameLength; i++) filename += String.fromCharCode(bytes[offset++]);
-      const fileSize = (bytes[offset++] << 24) | (bytes[offset++] << 16) | (bytes[offset++] << 8) | bytes[offset++];
-      let fileType = '';
-      for (let i = 0; i < 8; i++) { const c = bytes[offset++]; if (c !== 0) fileType += String.fromCharCode(c); }
-      const payloadEnd = offset + fileSize;
-      const payloadBytes = bytes.slice(offset, payloadEnd);
-      let payloadText = '';
-      for (let i = 0; i < payloadBytes.length; i++) payloadText += String.fromCharCode(payloadBytes[i]);
-      offset = payloadEnd;
-      const receivedChecksum = bytes[offset];
-      const calculated = crc8(bytes.slice(0, offset));
-      if (calculated !== receivedChecksum) {
-        return { error: `CRC mismatch (expected 0x${calculated.toString(16)}, got 0x${receivedChecksum.toString(16)})` };
-      }
-      return { filename, fileSize, fileType, payloadText, valid: true };
+      const eP = goertzel(samples, SPEC.POSTAMBLE_FREQ, SPEC.SAMPLE_RATE);
+      const eS = goertzel(samples, SPEC.SPACE_FREQ,     SPEC.SAMPLE_RATE);
+      const eM = goertzel(samples, SPEC.MARK_FREQ,      SPEC.SAMPLE_RATE);
+      return eP > eS * 2 && eP > eM * 2 && eP > 5.0;
     }
 
     function decodeFullSampleBuffer(samples) {
       let bitBuffer = [];
       let preambleDetected = false, lastBit = -1, altCount = 0;
       let postambleStreak = 0;
-      const PREAMBLE_THRESHOLD = 18;
+      const PREAMBLE_THRESHOLD = SPEC.PREAMBLE_THRESHOLD;
       let i = 0;
 
       while (i + SAMPLES_PER_BIT <= samples.length) {
-        const window = samples.subarray(i, i + SAMPLES_PER_BIT);
+        const windowSamples = samples.subarray(i, i + SAMPLES_PER_BIT);
         i += SAMPLES_PER_BIT;
 
-        if (preambleDetected && detectPostamble(window)) {
+        if (preambleDetected && detectPostamble(windowSamples)) {
           postambleStreak++;
           if (postambleStreak >= 2) {
-            return decodeBitsToBytes(bitBuffer);
+            return window.FSKDecoder.decodeBitsToBytes(bitBuffer);
           }
           continue;
         } else {
           postambleStreak = 0;
         }
 
-        const bit = detectBit(window);
+        const { bit, isSilence } = detectBit(windowSamples);
 
         if (!preambleDetected) {
           if (lastBit === -1) { lastBit = bit; altCount = 1; }
           else if (bit !== lastBit) {
             altCount++; lastBit = bit;
-            if (altCount >= PREAMBLE_THRESHOLD) { preambleDetected = true; bitBuffer = []; log('Preamble detected after ' + altCount + ' windows.'); }
+            if (altCount >= PREAMBLE_THRESHOLD) {
+              preambleDetected = true;
+              bitBuffer = [];
+              log('Preamble detected after ' + altCount + ' alternating windows.');
+            }
           } else { altCount = 1; lastBit = bit; }
         } else {
+          if (isSilence && bitBuffer.length === 0) continue;
           bitBuffer.push(bit);
         }
       }
-      return decodeBitsToBytes(bitBuffer);
+      return window.FSKDecoder.decodeBitsToBytes(bitBuffer);
     }
 
     document.getElementById('runBtn').addEventListener('click', () => {
       logEl.textContent = '';
-      const text = document.getElementById('testText').value;
-      const filename = 'test.txt';
+      const text = document.getElementById('testText').value || "Hello World";
+      const filename = 'diagnostic_test.txt';
 
-      log('SPEC in use: ' + JSON.stringify(LOCAL_SPEC));
-      log('Encoding "' + text + '" as "' + filename + '"...');
+      log('--- Protocol Spec ---');
+      log(`Baud: ${SPEC.BAUD_RATE} baud (${SPEC.BIT_DURATION_SEC * 1000}ms/bit) | Freq: ${SPEC.SPACE_FREQ}/${SPEC.MARK_FREQ} Hz | Sample Rate: ${SPEC.SAMPLE_RATE} Hz`);
+      log(`Preamble threshold: ${SPEC.PREAMBLE_THRESHOLD} windows | Postamble: ${SPEC.POSTAMBLE_FREQ} Hz`);
+
+      // Test 1: CRC-8 standard test vector
+      const testVector = new TextEncoder().encode("123456789");
+      const crcResult = window.FSKEncoder.crc8(testVector);
+      log(`\n1. CRC-8 Test Vector ("123456789"): Expected 0xF4, Got 0x${crcResult.toString(16).toUpperCase()} -> ${crcResult === 0xF4 ? '✅ PASS' : '❌ FAIL'}`);
+
+      // Test 2: Audio Loopback for user text
+      log('\n2. Software Audio Loopback (Text Payload):');
+      log('Encoding text "' + text + '" as "' + filename + '"...');
 
       const samples = window.FSKHelpers.packetToAudioSamples(text, filename);
-      log('Generated ' + samples.length + ' audio samples (' + (samples.length / LOCAL_SPEC.SAMPLE_RATE).toFixed(2) + 's).');
+      log('Generated ' + samples.length + ' audio samples (' + (samples.length / SPEC.SAMPLE_RATE).toFixed(2) + 's).');
 
-      log('Decoding purely in memory (no mic/speaker)...');
+      log('Demodulating samples in memory...');
       const bytes = decodeFullSampleBuffer(samples);
       log('Decoded ' + bytes.length + ' raw bytes.');
 
-      const packet = parsePacket(bytes);
-      if (packet.error) {
+      const packet = window.FSKDecoder.parsePacket(bytes);
+      if (packet.error || !packet.valid) {
         log('❌ FAILED: ' + packet.error);
       } else {
+        const decodedText = new TextDecoder("utf-8").decode(packet.payloadBytes);
         log('✅ SUCCESS');
         log('Filename: ' + packet.filename);
-        log('File size: ' + packet.fileSize);
+        log('File size: ' + packet.fileSize + ' bytes');
         log('File type: ' + packet.fileType);
-        log('Payload: "' + packet.payloadText + '"');
-        log('Matches original: ' + (packet.payloadText === text));
+        log('Payload: "' + decodedText + '"');
+        log('Matches original: ' + (decodedText === text ? '✅ YES' : '❌ NO'));
+      }
+
+      // Test 3: Binary Payload Loopback
+      log('\n3. Software Audio Loopback (Raw Binary Bytes Payload):');
+      const binaryData = new Uint8Array([0x00, 0x01, 0x02, 0x7F, 0x80, 0xFE, 0xFF, 0x42]);
+      const binFilename = 'test_data.bin';
+      log(`Encoding ${binaryData.length} binary bytes...`);
+
+      const binSamples = window.FSKHelpers.packetToAudioSamples(binaryData, binFilename);
+      const binBytes = decodeFullSampleBuffer(binSamples);
+      const binPacket = window.FSKDecoder.parsePacket(binBytes);
+
+      if (binPacket.error || !binPacket.valid) {
+        log('❌ FAILED Binary Loopback: ' + binPacket.error);
+      } else {
+        let match = binPacket.payloadBytes.length === binaryData.length;
+        if (match) {
+          for (let k = 0; k < binaryData.length; k++) {
+            if (binPacket.payloadBytes[k] !== binaryData[k]) {
+              match = false;
+              break;
+            }
+          }
+        }
+        log(`✅ BINARY LOOPBACK SUCCESS: Byte-for-byte equality -> ${match ? '✅ MATCH' : '❌ MISMATCH'}`);
       }
     });
 

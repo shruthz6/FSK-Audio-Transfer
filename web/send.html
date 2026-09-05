@@ -19,7 +19,7 @@
       <label class="dropzone" id="dropzone">
         <div class="dz-icon">📄</div>
         <div>Click to choose a file, or drag one here</div>
-        <div style="font-size:12px; margin-top:4px;">Text-based files work best (.txt, .csv, .json, code files)</div>
+        <div style="font-size:12px; margin-top:4px;">Supports all small binary files up to 2 KB (.png, .pdf, .txt, .bin, etc.)</div>
         <input type="file" id="fileInput" />
       </label>
 
@@ -32,15 +32,15 @@
       <button class="btn-primary" id="sendBtn" disabled>Play / Send</button>
       <div class="status-line">
         <span class="status-dot" id="statusDot"></span>
-        <span id="statusText">Choose a file to begin.</span>
+        <span id="statusText">Choose a file to begin (max 2 KB).</span>
       </div>
     </div>
 
     <a class="nav-link" href="receive.html">Go to Receive app →</a>
   </div>
 
-  <script src="encoder/encoder.js"></script>
-  <script src="shared/fsk-helpers.js"></script>
+  <script src="encoder/encoder.js?v=2.1"></script>
+  <script src="shared/fsk-helpers.js?v=2.1"></script>
   <script>
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileInput');
@@ -53,6 +53,7 @@
     const statusText = document.getElementById('statusText');
 
     let selectedFile = null;
+    const MAX_FILE_SIZE_BYTES = 2048; // 2 KB maximum for 50 baud acoustic transfer
 
     function setStatus(text, state) {
       statusText.textContent = text;
@@ -66,12 +67,22 @@
     }
 
     function onFileChosen(file) {
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        selectedFile = null;
+        fileInput.value = '';
+        fileChip.classList.remove('visible');
+        sendBtn.disabled = true;
+        setStatus('❌ File too large (' + formatSize(file.size) + '). Maximum size for 50 baud audio is 2 KB.', 'bad');
+        alert('⚠️ File Too Large (' + formatSize(file.size) + ')\n\nFSK Audio File Transfer operates at 50 baud (50 bits/sec).\n\nAt 50 baud, a 1 KB file takes ~3.3 minutes to transmit, and larger files (like standard PDFs/images) require gigabytes of browser RAM for audio buffers.\n\nPlease choose a file smaller than 2 KB (e.g., small .txt, tiny icon, or short binary snippet).');
+        return;
+      }
+
       selectedFile = file;
       fileNameEl.textContent = file.name;
       fileSizeEl.textContent = formatSize(file.size);
       fileChip.classList.add('visible');
       sendBtn.disabled = false;
-      setStatus('Ready to send "' + file.name + '".');
+      setStatus('Ready to send "' + file.name + '" (' + formatSize(file.size) + ').');
     }
 
     dropzone.addEventListener('click', (e) => {
@@ -114,9 +125,10 @@
       setStatus('Reading file...', 'active');
 
       try {
-        const text = await selectedFile.text();
+        const buffer = await selectedFile.arrayBuffer();
+        const payloadBytes = new Uint8Array(buffer);
         setStatus('Encoding + playing "' + selectedFile.name + '"...', 'active');
-        await FSKHelpers.playPacket(text, selectedFile.name);
+        await FSKHelpers.playPacket(payloadBytes, selectedFile.name);
 
         setStatus('Done. Sent "' + selectedFile.name + '".', 'good');
       } catch (err) {

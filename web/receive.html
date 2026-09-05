@@ -39,7 +39,7 @@
     <a class="nav-link" href="send.html">← Go to Send app</a>
   </div>
 
-  <script src="decoder/decoder.js"></script>
+  <script src="decoder/decoder.js?v=2.1"></script>
   <script>
     const startBtn = document.getElementById('start-btn');
     const stopBtn = document.getElementById('stop-btn');
@@ -56,25 +56,45 @@
       const msg = statusEl.textContent;
       statusDotVisual.className = 'status-dot';
       if (msg.includes('Listening')) statusDotVisual.classList.add('active');
-      else if (msg.includes('complete')) statusDotVisual.classList.add('good');
-      else if (msg.includes('failed') || msg.includes('error') || msg.includes('Error')) statusDotVisual.classList.add('bad');
+      else if (msg.includes('Received') || msg.includes('complete') || msg.includes('File received')) statusDotVisual.classList.add('good');
+      else if (msg.includes('failed') || msg.includes('error') || msg.includes('Error') || msg.includes('corrupted') || msg.includes('No signal')) statusDotVisual.classList.add('bad');
     });
     statusObserver.observe(statusEl, { childList: true, characterData: true, subtree: true });
 
-    const outputObserver = new MutationObserver(() => {
-      const text = outputBox.textContent;
-      outputBox.classList.toggle('has-content', text && text !== '(nothing decoded yet)');
-
-      const match = text.match(/\[✅ File: (.+?) \| Size: (\d+)b \| Type: (.*?)\]\n([\s\S]*)/);
-      if (match) {
-        lastDecodedPacket = { filename: match[1], fileType: match[3], payloadText: match[4] };
-        downloadBtn.style.display = 'block';
-      } else {
+    function handlePacketDecoded(packet) {
+      if (!packet || !packet.valid || packet.error) {
+        statusEl.textContent = '❌ Transfer failed — data corrupted, please try again';
+        statusDotVisual.className = 'status-dot bad';
+        outputBox.textContent = '⚠️ Transfer failed — data corrupted, please try again';
+        outputBox.classList.add('has-content');
         downloadBtn.style.display = 'none';
         lastDecodedPacket = null;
+        return;
       }
-    });
-    outputObserver.observe(outputBox, { childList: true, characterData: true, subtree: true });
+
+      lastDecodedPacket = packet;
+      statusEl.textContent = `✅ Received file "${packet.filename}" (${packet.fileSize} bytes)`;
+      statusDotVisual.className = 'status-dot good';
+
+      let previewText = `Filename: ${packet.filename}\nSize: ${packet.fileSize} bytes\nType: ${packet.fileType || 'bin'}\nCRC-8: Verified ✅`;
+
+      try {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(packet.payloadBytes);
+        if (/^[\x20-\x7E\s\r\n]*$/.test(text)) {
+          previewText += `\n\n--- Content Preview ---\n${text}`;
+        }
+      } catch (e) {
+        previewText += `\n\n[Binary content — ${packet.fileSize} bytes]`;
+      }
+
+      outputBox.textContent = previewText;
+      outputBox.classList.add('has-content');
+      downloadBtn.style.display = 'block';
+    }
+
+    if (window.FSKDecoder) {
+      window.FSKDecoder.onPacketDecoded = handlePacketDecoded;
+    }
 
     startBtn.addEventListener('click', startListening);
     stopBtn.addEventListener('click', stopListening);
@@ -82,16 +102,27 @@
       clearOutput();
       downloadBtn.style.display = 'none';
       lastDecodedPacket = null;
+      outputBox.classList.remove('has-content');
     });
     selfTestBtn.addEventListener('click', runSelfTest);
 
     downloadBtn.addEventListener('click', () => {
-      if (!lastDecodedPacket) return;
-      const blob = new Blob([lastDecodedPacket.payloadText], { type: 'text/plain' });
+      if (!lastDecodedPacket || !lastDecodedPacket.payloadBytes) return;
+
+      let mimeType = 'application/octet-stream';
+      const ext = (lastDecodedPacket.fileType || '').toLowerCase().trim();
+      if (ext === 'txt') mimeType = 'text/plain;charset=utf-8';
+      else if (ext === 'png') mimeType = 'image/png';
+      else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+      else if (ext === 'pdf') mimeType = 'application/pdf';
+      else if (ext === 'json') mimeType = 'application/json';
+      else if (ext === 'html') mimeType = 'text/html';
+
+      const blob = new Blob([lastDecodedPacket.payloadBytes], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = lastDecodedPacket.filename || ('decoded.' + (lastDecodedPacket.fileType || 'txt'));
+      a.download = lastDecodedPacket.filename || ('decoded.' + (ext || 'bin'));
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
